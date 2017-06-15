@@ -512,20 +512,20 @@ class Concat(Layer):
     self.l2_normalize = l2_normalize
     super(Concat, self).__init__(**kwargs)
 
-  def create_tensor(self, in_layers=None, **kwargs):
-    if in_layers is None:
-      in_layers = self.in_layers
-    in_layers = convert_to_layers(in_layers)
-    if len(in_layers) == 1:
-      self.out_tensor = in_layers[0].out_tensor
+  def create_tensor(self, in_layers=None, set_tensors=True, **kwargs):
+    inputs = self._get_input_tensors(in_layers)
+    if len(inputs) == 1:
+      self.out_tensor = inputs[0]
       return self.out_tensor
-    out_tensors = [x.out_tensor for x in in_layers]
+  
     if self.l2_normalize:
-      to_norm_tensor = tf.concat(out_tensors, 1)
-      self.out_tensor = tf.nn.l2_normalize(to_norm_tensor, 1)
+      to_l2norm_tensor = tf.concat(inputs, axis=self.axis)
+      out_tensor = tf.nn.l2_normalize(to_l2norm_tensor, self.axis)
     else:
-      self.out_tensor = tf.concat(out_tensors, axis=self.axis)
-    return self.out_tensor
+      out_tensor = tf.concat(inputs, axis=self.axis)
+    if set_tensors:
+      self.out_tensor = out_tensor
+    return out_tensor
 
 
 class Constant(Layer):
@@ -989,7 +989,12 @@ class GraphPool(Layer):
     return out_tensor
 
 class GraphGather(Layer):
-
+    
+  def __init__(self, batch_size, activation_fn=None, **kwargs):
+    self.batch_size = batch_size
+    self.activation_fn = activation_fn
+    super(GraphGather, self).__init__(**kwargs)
+  
   def _reduce_max_greater_equal(self, x, k):
     dim = int(x.shape[1])
     x_T = tf.transpose(x)
