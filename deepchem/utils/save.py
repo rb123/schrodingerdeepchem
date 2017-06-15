@@ -72,8 +72,10 @@ def load_sdf_files(input_files, clean_mols, only_sdf=False):
   dataframes = []
   for input_file in input_files:
     # Tasks are stored in .sdf.csv file
-    if ~only_sdf:
+    if not only_sdf:
         raw_df = next(load_csv_files([input_file + ".csv"], shard_size=None))
+    else:
+        raw_df = None
     # Structures are stored in .sdf file
     print("Reading structures from %s." % input_file)
     suppl = Chem.SDMolSupplier(str(input_file), clean_mols, False, False)
