@@ -15,6 +15,7 @@ import numpy as np
 import os
 import deepchem
 from rdkit import Chem
+from rdkit.Chem import PandasTools
 
 
 def log(string, verbose=True):
@@ -67,22 +68,29 @@ def load_data(input_files, shard_size=None, verbose=True):
       yield load_pickle_from_disk(input_file)
 
 
-def load_sdf_files(input_files, clean_mols):
+def load_sdf_files(input_files, clean_mols, only_sdf=False):
   """Load SDF file into dataframe."""
   dataframes = []
   for input_file in input_files:
     # Tasks are stored in .sdf.csv file
-    raw_df = next(load_csv_files([input_file + ".csv"], shard_size=None))
+    if ~only_sdf:
+        raw_df = next(load_csv_files([input_file + ".csv"], shard_size=None))
     # Structures are stored in .sdf file
     print("Reading structures from %s." % input_file)
+    mol_df = PandasTools.LoadSDF(input_file, smilesName='smiles')
+    mol_df = mol_df.drop('ID', axis=1)
+    mol_df.rename(columns={'ROMol':'mol'}, inplace=True)
+    dataframes.append(pd.concat([mol_df, raw_df], axis=1, join='inner'))
     suppl = Chem.SDMolSupplier(str(input_file), clean_mols, False, False)
     df_rows = []
     for ind, mol in enumerate(suppl):
       if mol is not None:
         smiles = Chem.MolToSmiles(mol)
-        df_rows.append([ind, smiles, mol])
-    mol_df = pd.DataFrame(df_rows, columns=('mol_id', 'smiles', 'mol'))
-    dataframes.append(pd.concat([mol_df, raw_df], axis=1, join='inner'))
+        mol_props = mol.GetPropsAsDict()
+        all_keys = [ind, smiles, mol]+list(mol_props.values())
+        df_rows.append(all_keys)
+    df_columns = ('mol_id', 'smiles', 'mol')+tuple(mol_props.keys())
+    mol_df = pd.DataFrame(df_rows, columns=df_columns)
   return dataframes
 
 

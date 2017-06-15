@@ -323,7 +323,7 @@ class TensorGraph(Model):
       for node in order:
         with tf.name_scope(node):
           node_layer = self.layers[node]
-          node_layer.create_tensor()
+          node_layer.create_tensor(training=self._training_placeholder)
       self.built = True
 
     for layer in self.layers.values():
@@ -336,7 +336,7 @@ class TensorGraph(Model):
     if self.tensorboard:
       writer = self._get_tf("FileWriter")
       writer.add_graph(self._get_tf("Graph"))
-      writer.close()
+      writer.close()    
 
   def _install_queue(self):
     """

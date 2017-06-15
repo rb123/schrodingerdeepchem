@@ -507,13 +507,12 @@ class SoftMax(Layer):
 
 class Concat(Layer):
 
-  def __init__(self, axis=1, normalize=False, svd=False, **kwargs):
+  def __init__(self, axis=1, l2_normalize=False, **kwargs):
     self.axis = axis
-    self.normalize = normalize
-    self.svd = svd
+    self.l2_normalize = l2_normalize
     super(Concat, self).__init__(**kwargs)
 
-  def create_tensor(self, in_layers=None):
+  def create_tensor(self, in_layers=None, **kwargs):
     if in_layers is None:
       in_layers = self.in_layers
     in_layers = convert_to_layers(in_layers)
@@ -521,7 +520,7 @@ class Concat(Layer):
       self.out_tensor = in_layers[0].out_tensor
       return self.out_tensor
     out_tensors = [x.out_tensor for x in in_layers]
-    if self.normalize:
+    if self.l2_normalize:
       to_norm_tensor = tf.concat(out_tensors, 1)
       self.out_tensor = tf.nn.l2_normalize(to_norm_tensor, 1)
     else:
@@ -989,28 +988,29 @@ class GraphPool(Layer):
       self.out_tensor = out_tensor
     return out_tensor
 
-def geqk(x,k):
-  dim = int(x.shape[1])
-  x_T = tf.transpose(x)
-  k_max = tf.nn.top_k(x_T, k=k, sorted=True)
-  flat = tf.reshape(k_max[0], [-1, (k*dim)])
-  return flat
-
-def lessk(x,k):
-  top = tf.reduce_max(x, 0, keep_dims=True)
-  repl = tf.concat(axis=1,values=[top]*k)
-  return repl
-
-def reduce_max_k(x,k):
-  no_atoms = tf.shape(x)[0]
-  reduce_op = tf.cond(tf.less(no_atoms,k), lambda: lessk(x,k), lambda: geqk(x,k))
-  return reduce_op
-
 class GraphGather(Layer):
 
-  def __init__(self, batch_size, activation_fn=None, **kwargs):
+  def _reduce_max_greater_equal(self, x, k):
+    dim = int(x.shape[1])
+    x_T = tf.transpose(x)
+    k_max = tf.nn.top_k(x_T, k=k, sorted=True)
+    flat = tf.reshape(k_max[0], [-1, (k*dim)])
+    return flat
+
+  def _reduce_max_less(self, x, k):
+    top = tf.reduce_max(x, 0, keep_dims=True)
+    repl = tf.concat(axis=1,values=[top]*k)
+    return repl
+
+  def _reduce_max_k(self, x, k):
+    no_atoms = tf.shape(x)[0]
+    reduce_op = tf.cond(tf.less(no_atoms,k), lambda: self._reduce_max_less(x,k), lambda: self._reduce_max_greater_equal(x,k))
+    return reduce_op
+
+  def __init__(self, batch_size, activation_fn=None, max_of=1, **kwargs):
     self.batch_size = batch_size
     self.activation_fn = activation_fn
+    self.max_of = max_of
     super(GraphGather, self).__init__(**kwargs)
 
   def create_tensor(self, in_layers=None, set_tensors=True, **kwargs):
@@ -1035,11 +1035,15 @@ class GraphGather(Layer):
         tf.reduce_mean(activated, 0, keep_dims=True)
         for activated in activated_par
     ]
-    max_reps = [
-        #tf.reduce_max(activated, 0, keep_dims=True)
-        reduce_max_k(activated,3)
-        for activated in activated_par
-    ]
+    
+    if self.max_of > 1:
+      max_reps = [
+          self._reduce_max_k(activated, self.max_of) for activated in activated_par
+      ]
+    else:
+      max_reps = [
+          tf.reduce_max(activated, 0, keep_dims=True) for activated in activated_par
+      ]
 
     # Get the final sparse representations
     sparse_reps = tf.concat(axis=0, values=sparse_reps)
@@ -1509,11 +1513,18 @@ class NeighborList(Layer):
 
 class Dropout(Layer):
 
-  def create_tensor(self):
-    parent_tensor = self.in_layers[0].out_tensor
-    dropout_prob = self.in_layers[1].out_tensor
-    self.out_tensor = tf.nn.dropout(parent_tensor, dropout_prob)
-    return self.out_tensor
+  def __init__(self, dropout_prob, **kwargs):
+    self.dropout_prob = dropout_prob
+    super(Dropout, self).__init__(**kwargs)
+
+  def create_tensor(self, in_layers=None, set_tensors=True, **kwargs):
+    inputs = self._get_input_tensors(in_layers)
+    parent_tensor = inputs[0]
+    keep_prob = 1.0 - self.dropout_prob * kwargs['training']
+    out_tensor = tf.nn.dropout(parent_tensor, keep_prob)
+    if set_tensors:
+      self.out_tensor = out_tensor
+    return out_tensor
 
 
 class WeightDecay(Layer):
