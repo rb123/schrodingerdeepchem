@@ -67,6 +67,7 @@ def load_data(input_files, shard_size=None, verbose=True):
       yield load_pickle_from_disk(input_file)
 
 
+
 def load_sdf_files(input_files, clean_mols, only_sdf=False):
   """Load SDF file into dataframe."""
   dataframes = []
@@ -84,10 +85,11 @@ def load_sdf_files(input_files, clean_mols, only_sdf=False):
       if mol is not None:
         smiles = Chem.MolToSmiles(mol)
         mol_props = mol.GetPropsAsDict()
-        all_keys = [ind, smiles, mol]+list(mol_props.values())
-        df_rows.append(all_keys)
-    df_columns = ('mol_id', 'smiles', 'mol')+tuple(mol_props.keys())
-    mol_df = pd.DataFrame(df_rows, columns=df_columns)
+        mol_props['mol'] = mol
+        mol_props['mol_id'] = ind
+        mol_props['smiles'] = smiles
+        df_rows.append(mol_props)
+    mol_df = pd.DataFrame(df_rows)
     dataframes.append(pd.concat([mol_df, raw_df], axis=1, join='inner'))
   return dataframes
 

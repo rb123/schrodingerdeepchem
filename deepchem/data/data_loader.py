@@ -50,7 +50,7 @@ def convert_df_to_numpy(df, tasks, verbose=False):
         y[ind, task] = 0.
         w[ind, task] = 0.
 
-  return y.astype(float), w.astype(float)
+  return y, w.astype(float)
 
 
 def featurize_smiles_df(df, featurizer, field, log_every_N=1000, verbose=True):
