@@ -9,7 +9,7 @@ import six
 import tensorflow as tf
 from tensorflow.python.framework.errors_impl import OutOfRangeError
 
-from deepchem.data import NumpyDataset
+from deepchem.data import NumpyDataset, DiskDataset
 from deepchem.metrics import to_one_hot, from_one_hot
 from deepchem.models.models import Model
 from deepchem.models.tensorgraph.layers import InputFifoQueue, Label, Feature, Weights
@@ -106,7 +106,26 @@ class TensorGraph(Model):
     for in_layer in layer.in_layers:
       self._add_layer(in_layer)
       self.nxgraph.add_edge(in_layer.name, layer.name)
-
+  
+  def _eval_valid(self, sess, valid_fdg):
+      def create_feed_dict():
+          if self.use_queue:
+              while True:
+                  yield {self._training_placeholder: 1.0}
+          for d in valid_fdg:
+              feed_dict = {k.out_tensor: v for k, v in six.iteritems(d)}
+              feed_dict[self._training_placeholder] = 1.0
+              yield feed_dict
+      avg_cost, n_batches = 0.0, 0.0
+      for feed_dict1 in create_feed_dict():
+          try:
+              valid_cost = sess.run(self.cost.out_tensor, feed_dict=feed_dict1)
+              avg_cost += valid_cost
+              n_batches += 1
+          except OutOfRangeError:
+              break
+      return avg_cost
+          
   def fit(self,
           dataset,
           nb_epoch=10,
@@ -118,9 +137,10 @@ class TensorGraph(Model):
 
   def fit_generator(self,
                     feed_dict_generator,
+                    valid_gen=None,
+                    valid_start=0,
                     max_checkpoints_to_keep=5,
                     checkpoint_interval=1000):
-
     def create_feed_dict():
       if self.use_queue:
         while True:
@@ -149,6 +169,7 @@ class TensorGraph(Model):
           enqueue_thread.start()
         output_tensors = [x.out_tensor for x in self.outputs]
         fetches = output_tensors + [train_op, self.loss.out_tensor]
+        prev_valid = np.inf
         for feed_dict in create_feed_dict():
           try:
             fetched_values = sess.run(fetches, feed_dict=feed_dict)
@@ -168,6 +189,13 @@ class TensorGraph(Model):
             avg_loss = float(avg_loss) / n_batches
             print('Ending global_step %d: Average loss %g' % (self.global_step,
                                                               avg_loss))
+            if valid_gen:
+                valid_error = self._eval_valid(sess, valid_gen.iter())
+                print('Validation Error %g' % (valid_error))
+                if self.global_step >= valid_start and valid_error>prev_valid:
+                    print("Validation Error increased, exiting")
+                    break
+                prev_valid = valid_error
             avg_loss, n_batches = 0.0, 0.0
         avg_loss = float(avg_loss) / n_batches
         print('Ending global_step %d: Average loss %g' % (self.global_step,
@@ -246,7 +274,7 @@ class TensorGraph(Model):
     Returns:
       y_pred: numpy ndarray of shape (n_samples, n_classes*n_tasks)
     """
-    if not self.built:
+    if not self.built: 
       self.build()
     with self._get_tf("Graph").as_default():
       with tf.Session() as sess:
@@ -367,6 +395,10 @@ class TensorGraph(Model):
   def set_loss(self, layer):
     self._add_layer(layer)
     self.loss = layer
+    
+  def set_cost(self, layer):
+    self._add_layer(layer)
+    self.cost = layer
 
   def add_output(self, layer):
     self._add_layer(layer)
