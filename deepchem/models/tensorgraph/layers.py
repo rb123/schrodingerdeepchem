@@ -1020,25 +1020,14 @@ class GraphGather(Layer):
 
   def _dynamic_partition_gpu(self, atoms, mems, batch_size):
     atoms_t = tf.transpose(atoms)
+    mems_ohe = tf.one_hot(mems, batch_size)
     activated_par = []
     for i in range(batch_size):
-        mask = mems[:,i]
+        mask = mems_ohe[:,i]
         act_par_t = tf.multiply(atoms_t,mask)
         activated = tf.transpose(act_par_t)
         activated_par.append(activated)
-    max_reps = [tf.reduce_max(activated, 0, keep_dims=True)
-        for activated in activated_par]
-    sparse_reps = []
-    total_atoms_int = tf.shape(atoms)[0]
-    total_atoms = tf.cast(total_atoms_int, tf.float32)
-    for i, activated in enumerate(activated_par):
-        mask = mems[:,i]
-        atoms_in_mol = tf.reduce_sum(mask)
-        act_batch = tf.multiply(activated, total_atoms)
-        act_mol = tf.multiply(act_batch, 1.0/atoms_in_mol)
-        avg_atoms = tf.reduce_mean(act_mol, 0, keep_dims=True)
-        sparse_reps.append(avg_atoms)
-    return (max_reps, sparse_reps)
+    return activated_par
         
   def create_tensor(self, in_layers=None, set_tensors=True, **kwargs):
     inputs = self._get_input_tensors(in_layers)
@@ -1054,26 +1043,25 @@ class GraphGather(Layer):
     assert (self.batch_size > 1, "graph_gather requires batches larger than 1")
 
     # Obtain the partitions for each of the molecules
-#    activated_par = tf.dynamic_partition(atom_features, membership,
-#                                         self.batch_size)
+    
+    activated_par = self._dynamic_partition_gpu(atom_features, membership,
+                                                self.batch_size)
 
     # Sum over atoms for each molecule
-#    sparse_reps = [
-#        tf.reduce_mean(activated, 0, keep_dims=True)
-#        for activated in activated_par
-#    ]
-#    
-#    if self.max_of > 1:
-#      max_reps = [
-#          self._reduce_max_k(activated, self.max_of) for activated in activated_par
-#      ]
-#    else:
-#      max_reps = [
-#          tf.reduce_max(activated, 0, keep_dims=True) for activated in activated_par
-#      ]
+    sparse_reps = [
+        tf.reduce_sum(activated, 0, keep_dims=True)
+        for activated in activated_par
+    ]
+    
+    if self.max_of > 1:
+      max_reps = [
+          self._reduce_max_k(activated, self.max_of) for activated in activated_par
+      ]
+    else:
+      max_reps = [
+          tf.reduce_max(activated, 0, keep_dims=True) for activated in activated_par
+      ]
 
-    max_reps, sparse_reps = self._dynamic_partition_gpu(atom_features, membership,
-                                                        self.batch_size)
     # Get the final sparse representations
     sparse_reps = tf.concat(axis=0, values=sparse_reps)
     max_reps = tf.concat(axis=0, values=max_reps)
