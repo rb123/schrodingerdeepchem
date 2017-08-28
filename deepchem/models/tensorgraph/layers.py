@@ -1018,6 +1018,17 @@ class GraphGather(Layer):
     self.max_of = max_of
     super(GraphGather, self).__init__(**kwargs)
 
+  def _dynamic_partition_gpu(self, atoms, mems, batch_size):
+    atoms_t = tf.transpose(atoms)
+    mems_ohe = tf.one_hot(mems, batch_size)
+    activated_par = []
+    for i in range(batch_size):
+        mask = mems_ohe[:,i]
+        act_par_t = tf.multiply(atoms_t,mask)
+        activated = tf.transpose(act_par_t)
+        activated_par.append(activated)
+    return activated_par
+
   def create_tensor(self, in_layers=None, set_tensors=True, **kwargs):
     inputs = self._get_input_tensors(in_layers)
 
@@ -1032,7 +1043,7 @@ class GraphGather(Layer):
     assert (self.batch_size > 1, "graph_gather requires batches larger than 1")
 
     # Obtain the partitions for each of the molecules
-    activated_par = tf.dynamic_partition(atom_features, membership,
+    activated_par = self._dynamic_partition_gpu(atom_features, membership,
                                          self.batch_size)
 
     # Sum over atoms for each molecule
